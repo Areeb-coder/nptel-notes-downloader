@@ -71,9 +71,10 @@ The browser or Google Drive may adjust a filename based on download response hea
 2. Collects sidebar labels matching the supported Lecture Notes patterns.
 3. Clicks each matching entry, without intentionally opening ordinary lecture rows.
 4. Looks for the visible NPTEL download link and accessible embedded Google Drive references.
-5. Extracts a Drive file ID when it is exposed.
-6. Starts a browser download using the Google Drive download endpoint.
-7. Prints a summary of download requests and failures.
+5. If the embedded viewer exposes an open/external control, attempts to capture the URL opened by that control.
+6. Extracts a Drive file ID when it is exposed.
+7. Starts a browser download using the Google Drive download endpoint.
+8. Prints a summary of download requests and failures.
 
 ## Troubleshooting
 
