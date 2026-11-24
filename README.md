@@ -88,7 +88,7 @@ The browser or Google Drive may adjust a filename based on download response hea
 
 Some course pages expose notes through an embedded PDF viewer rather than a normal download link. A top-right open/external control may open the viewer in a separate Google Drive page.
 
-A script running on the NPTEL domain cannot inspect the contents of a cross-origin Google Drive page or iframe. If the final Drive file URL is not exposed by the NPTEL page, download that item manually using the viewer's open/download controls.
+The utility checks for a visible open/external control associated with the embedded viewer and can capture a URL when that control opens it through the page's `window.open()` call. A script running on the NPTEL domain still cannot inspect the contents of a cross-origin Google Drive page or iframe. If the viewer opens through a mechanism the page script cannot observe, download that item manually using the viewer's open/download controls.
 
 ### Google Drive asks for access
 
