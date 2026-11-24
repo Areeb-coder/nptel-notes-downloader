@@ -161,8 +161,75 @@
     return [...new Set(refs)];
   }
 
+  // Some NPTEL note pages show the PDF in an embedded viewer with a
+  // small open-in-new-window control in the viewer's top-right corner.
+  // When that control calls window.open(), capture its URL instead of
+  // opening another tab. Cross-origin iframe contents remain inaccessible.
+  function captureEmbeddedViewerOpenUrl() {
+    const viewerElements = [...document.querySelectorAll("iframe, embed, object")];
+    const candidates = [];
+
+    for (const viewer of viewerElements) {
+      let container = viewer.parentElement;
+
+      for (let depth = 0; depth < 5 && container; depth++, container = container.parentElement) {
+        const viewerRect = container.getBoundingClientRect();
+        if (viewerRect.width < 100 || viewerRect.height < 100) continue;
+
+        for (const control of container.querySelectorAll("a, button, [role='button']")) {
+          const label = normalize(
+            control.innerText + " " +
+            (control.getAttribute("aria-label") || "") + " " +
+            (control.getAttribute("title") || "") + " " +
+            (control.getAttribute("data-tooltip") || "")
+          ).toLowerCase();
+
+          if (!/(open|new window|new tab|pop.?out|external|launch)/i.test(label)) continue;
+
+          const rect = control.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) continue;
+
+          const nearTop = rect.top <= viewerRect.top + 90;
+          const nearRight = rect.right >= viewerRect.right - 110;
+          candidates.push({
+            control,
+            score: (nearTop ? 2 : 0) + (nearRight ? 3 : 0) + (control.href ? 2 : 0)
+          });
+        }
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+
+    for (const candidate of candidates) {
+      const control = candidate.control;
+      const directHref = control.href || control.getAttribute("href");
+      if (directHref && extractDriveId(directHref)) return directHref;
+
+      let capturedUrl = null;
+      const originalOpen = window.open;
+
+      try {
+        window.open = function (url) {
+          if (url) capturedUrl = new URL(String(url), location.href).href;
+          return null;
+        };
+        control.click();
+      } catch (error) {
+        // Try the next likely viewer control.
+      } finally {
+        window.open = originalOpen;
+      }
+
+      if (capturedUrl) return capturedUrl;
+    }
+
+    return null;
+  }
+
   async function waitForNoteDownloadTarget() {
     const started = Date.now();
+    let triedViewerOpenControl = false;
 
     while (Date.now() - started < CONFIG.linkWaitMs) {
       const anchor = findDownloadAnchor();
@@ -171,6 +238,12 @@
       const refs = inspectViewerReferences();
       const driveRef = refs.find((url) => extractDriveId(url));
       if (driveRef) return { kind: "viewer", url: driveRef };
+
+      if (!triedViewerOpenControl && Date.now() - started > 1200) {
+        triedViewerOpenControl = true;
+        const openedUrl = captureEmbeddedViewerOpenUrl();
+        if (openedUrl) return { kind: "viewer-open-control", url: openedUrl };
+      }
 
       await sleep(350);
     }
