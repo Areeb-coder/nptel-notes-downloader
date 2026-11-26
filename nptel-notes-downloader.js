@@ -1,39 +1,80 @@
 /*
- * NPTEL Assignment Solutions Downloader
- * Browser-console utility for downloading NPTEL assignment-solution PDFs.
+ * NPTEL Notes & Assignment Solutions Downloader
+ * Browser-console utility for NPTEL course materials.
  *
- * Usage: Open the NPTEL course page, open DevTools Console, and paste
- * this complete file. Review detected entries before allowing downloads.
- *
- * This utility only targets sidebar items labelled "Week N: Assignment N Solution".
- * It ignores ordinary lecture, quiz, feedback, and assignment rows that are not labelled as solutions.
+ * Run this file from an open NPTEL course page. The utility asks whether
+ * to download Lecture Notes or Assignment Solutions, then targets only
+ * the matching sidebar entries.
  */
 
 (async () => {
   "use strict";
 
   const CONFIG = {
-    pageWaitMs: 2200,
-    linkWaitMs: 10000,
-    betweenItemsMs: 1800,
+    pageWaitMs: 2500,
+    linkWaitMs: 12000,
+    betweenItemsMs: 2200,
     retries: 2,
     filenamePrefix: "NPTEL"
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  const assignmentSolutionPattern = /^Week\\s*\\d+\\s*:\\s*Assignment\\s*\\d+\\s*Solution$/i;
-  const alternateAssignmentSolutionPattern = /^Assignment\\s*\\d+\\s*Solution\\s+for\\s+Week\\s*\\d+$/i;
 
-  const log = (...args) => console.log("%c[NPTEL Assignment Solutions]", "color:#0891b2;font-weight:bold", ...args);
-  const success = (...args) => console.log("%c[NPTEL Assignment Solutions] ✓", "color:#16a34a;font-weight:bold", ...args);
-  const warn = (...args) => console.warn("%c[NPTEL Assignment Solutions]", "color:#d97706;font-weight:bold", ...args);
-  const fail = (...args) => console.error("%c[NPTEL Assignment Solutions]", "color:#dc2626;font-weight:bold", ...args);
+  const log = (...args) => console.log("%c[NPTEL Downloader]", "color:#0891b2;font-weight:bold", ...args);
+  const success = (...args) => console.log("%c[NPTEL Downloader] ✓", "color:#16a34a;font-weight:bold", ...args);
+  const warn = (...args) => console.warn("%c[NPTEL Downloader]", "color:#d97706;font-weight:bold", ...args);
+  const fail = (...args) => console.error("%c[NPTEL Downloader]", "color:#dc2626;font-weight:bold", ...args);
 
-  function isAssignmentSolutionLabel(text) {
-    const value = normalize(text);
-    return assignmentSolutionPattern.test(value) || alternateAssignmentSolutionPattern.test(value);
+  // Ask for the download category before scanning or clicking the sidebar.
+  const selection = window.prompt(
+    "NPTEL Notes & Assignment Solutions Downloader\n\nWhat would you like to download?\n\n1 - Lecture Notes\n2 - Assignment Solutions\n\nEnter 1 or 2:",
+    "1"
+  );
+
+  if (selection === null) {
+    log("Cancelled. No course items were opened.");
+    return;
   }
+
+  const choice = normalize(selection).toLowerCase();
+  let mode;
+
+  if (["1", "note", "notes", "lecture note", "lecture notes"].includes(choice)) {
+    mode = "notes";
+  } else if (["2", "assignment", "assignments", "assignment solution", "assignment solutions"].includes(choice)) {
+    mode = "assignments";
+  } else {
+    fail("Invalid selection. Run again and enter 1 for Lecture Notes or 2 for Assignment Solutions.");
+    return;
+  }
+
+  const MODE = mode === "notes"
+    ? {
+        title: "Lecture Notes",
+        sidebarDescription: "Lecture Notes",
+        matches: (text) => {
+          const value = normalize(text);
+          return /^Week\s*\d+\s*:\s*Lecture\s*Notes?$/i.test(value) ||
+            /^Lecture\s*Note[_\s-]*\d+\s+for\s+Week\s*\d+$/i.test(value);
+        },
+        downloadTextMatches: (text) => text.includes("lecture notes"),
+        filenameDetail: (label) => {
+          let detail = label.replace(/^Week\s*\d+\s*:\s*/i, "").trim();
+          return detail || "Lecture Notes";
+        }
+      }
+    : {
+        title: "Assignment Solutions",
+        sidebarDescription: "Assignment Solution",
+        matches: (text) => {
+          const value = normalize(text);
+          return /^Week\s*\d+\s*:\s*Assignment\s*\d+\s*Solution$/i.test(value) ||
+            /^Assignment\s*\d+\s*Solution\s+for\s+Week\s*\d+$/i.test(value);
+        },
+        downloadTextMatches: (text) => text.includes("assignment") || text.includes("solution"),
+        filenameDetail: (label) => label.replace(/^Week\s*\d+\s*:\s*/i, "").trim()
+      };
 
   function getWeek(text) {
     const match = normalize(text).match(/Week\s*(\d+)/i);
@@ -47,14 +88,22 @@
 
     for (const element of candidates) {
       const rect = element.getBoundingClientRect();
-      if (rect.width < 140 || rect.height < 180 || rect.left > window.innerWidth * 0.55) continue;
+      if (rect.width < 140 || rect.height < 160 || rect.left > window.innerWidth * 0.55) continue;
 
       const text = normalize(element.innerText);
-      if (!text || !/Week\\s*\\d+/i.test(text) || !/Assignment/i.test(text)) continue;
+      if (!text || !/Week\s*\d+/i.test(text)) continue;
 
-      const weekCount = (text.match(/Week\\s*\\d+/gi) || []).length;
-      const solutionCount = (text.match(/Assignment\\s*\\d+\\s*Solution/gi) || []).length;
-      const score = Math.min(weekCount, 30) * 3 + Math.min(solutionCount, 20) * 10 +
+      const weekCount = (text.match(/Week\s*\d+/gi) || []).length;
+      const targetCount = MODE.matchesTargetText
+        ? (text.match(MODE.matchesTargetText) || []).length
+        : MODE.sidebarDescription === "Lecture Notes"
+          ? (text.match(/Lecture\s*Notes?/gi) || []).length
+          : (text.match(/Assignment\s*\d+\s*Solution/gi) || []).length;
+
+      if (!targetCount) continue;
+
+      const score = Math.min(weekCount, 30) * 3 +
+        Math.min(targetCount, 20) * 10 +
         (element.scrollHeight > element.clientHeight + 40 ? 12 : 0) -
         Math.max(0, rect.width - 450) / 20;
 
@@ -67,12 +116,12 @@
     return best;
   }
 
-  function collectAssignmentSolutionLabels(sidebar) {
+  function collectTargetLabels(sidebar) {
     const labels = new Set();
 
     for (const element of sidebar.querySelectorAll("*")) {
       const label = normalize(element.innerText);
-      if (label && label.length <= 110 && isAssignmentSolutionLabel(label)) {
+      if (label && label.length <= 120 && MODE.matches(label)) {
         labels.add(label);
       }
     }
@@ -92,7 +141,7 @@
 
     if (!matches.length) return null;
 
-    // Prefer the smallest exact-text node, not a Week-level wrapper.
+    // Prefer the smallest exact-text node, not the whole Week container.
     matches.sort((a, b) => {
       const ra = a.getBoundingClientRect();
       const rb = b.getBoundingClientRect();
@@ -102,12 +151,53 @@
     return matches[0];
   }
 
-  function clickExactRow(sidebar, label) {
-    const row = findExactRow(sidebar, label);
-    if (!row) throw new Error("Could not find the exact sidebar row: " + label);
+  async function expandWeek(sidebar, week) {
+    const weekHeaderPattern = new RegExp("^Week\\s*" + week + "$", "i");
+    const headers = [...sidebar.querySelectorAll("*")].filter((element) => {
+      return normalize(element.innerText) === "Week " + week ||
+        weekHeaderPattern.test(normalize(element.innerText));
+    });
+
+    if (!headers.length) return false;
+
+    headers.sort((a, b) => {
+      const ra = a.getBoundingClientRect();
+      const rb = b.getBoundingClientRect();
+      return (ra.width * ra.height) - (rb.width * rb.height);
+    });
+
+    const header = headers[0];
+    header.scrollIntoView({ block: "center", behavior: "instant" });
+    await sleep(250);
+    header.click();
+    await sleep(650);
+    return true;
+  }
+
+  async function clickTargetRow(label) {
+    let sidebar = findSidebar();
+    if (!sidebar) throw new Error("Course sidebar could not be identified.");
+
+    let row = findExactRow(sidebar, label);
+
+    if (!row) {
+      const week = getWeek(label);
+      if (week !== null) {
+        log("Target row is not visible. Expanding Week", week);
+        await expandWeek(sidebar, week);
+      }
+
+      sidebar = findSidebar();
+      row = sidebar ? findExactRow(sidebar, label) : null;
+    }
+
+    if (!row) throw new Error("Could not find exact sidebar row: " + label);
 
     row.scrollIntoView({ block: "center", behavior: "instant" });
+    await sleep(350);
+    log("Clicking only the exact row:", label);
     row.click();
+    await sleep(CONFIG.pageWaitMs);
   }
 
   function findDownloadAnchor() {
@@ -119,18 +209,29 @@
     });
     if (byClickHere) return byClickHere;
 
-    const byAssignmentText = anchors.find((anchor) => {
+    const byModeText = anchors.find((anchor) => {
       const text = normalize(anchor.innerText || anchor.textContent).toLowerCase();
-      return text.includes("download") &&
-        (text.includes("assignment") || text.includes("solution"));
+      return text.includes("download") && MODE.downloadTextMatches(text);
     });
-    if (byAssignmentText) return byAssignmentText;
+    if (byModeText) return byModeText;
 
-    return anchors.find((anchor) => /drive\\.google\\.com|docs\\.google\\.com/i.test(anchor.href)) || null;
+    return anchors.find((anchor) => /drive\.google\.com|docs\.google\.com/i.test(anchor.href)) || null;
   }
 
   function extractDriveId(url) {
     if (!url) return null;
+
+    let value = String(url);
+    for (let i = 0; i < 2; i++) {
+      try {
+        const decoded = decodeURIComponent(value);
+        if (decoded === value) break;
+        value = decoded;
+      } catch {
+        break;
+      }
+    }
+
     const patterns = [
       /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i,
       /docs\.google\.com\/[^/]+\/d\/([a-zA-Z0-9_-]+)/i,
@@ -138,9 +239,10 @@
     ];
 
     for (const pattern of patterns) {
-      const match = String(url).match(pattern);
-      if (match?.[1]) return decodeURIComponent(match[1]);
+      const match = value.match(pattern);
+      if (match?.[1]) return match[1];
     }
+
     return null;
   }
 
@@ -156,21 +258,21 @@
       const href = anchor.href;
       const label = normalize(anchor.innerText || anchor.getAttribute("aria-label") || anchor.title);
       if (href && (/drive\.google\.com|docs\.google\.com/i.test(href) ||
-        /open|external|new tab/i.test(label))) refs.push(href);
+        /open|external|new tab|new window/i.test(label))) refs.push(href);
     }
 
     return [...new Set(refs)];
   }
 
-  // Some NPTEL note pages show the PDF in an embedded viewer with a
-  // small open-in-new-window control in the viewer's top-right corner.
-  // When that control calls window.open(), capture its URL instead of
-  // opening another tab. Cross-origin iframe contents remain inaccessible.
+  // Some NPTEL pages display a PDF viewer with an open/external control
+  // in the top-right corner. Capture URLs opened through window.open()
+  // when the control is part of the NPTEL document. Cross-origin iframe
+  // contents remain inaccessible to this script.
   function captureEmbeddedViewerOpenUrl() {
-    const viewerElements = [...document.querySelectorAll("iframe, embed, object")];
+    const viewers = [...document.querySelectorAll("iframe, embed, object")];
     const candidates = [];
 
-    for (const viewer of viewerElements) {
+    for (const viewer of viewers) {
       let container = viewer.parentElement;
 
       for (let depth = 0; depth < 5 && container; depth++, container = container.parentElement) {
@@ -185,17 +287,20 @@
             (control.getAttribute("data-tooltip") || "")
           ).toLowerCase();
 
-          if (!/(open|new window|new tab|pop.?out|external|launch)/i.test(label)) continue;
-
           const rect = control.getBoundingClientRect();
           if (rect.width <= 0 || rect.height <= 0) continue;
 
           const nearTop = rect.top <= viewerRect.top + 90;
           const nearRight = rect.right >= viewerRect.right - 110;
-          candidates.push({
-            control,
-            score: (nearTop ? 2 : 0) + (nearRight ? 3 : 0) + (control.href ? 2 : 0)
-          });
+          const labelled = /(open|new window|new tab|pop.?out|external|launch)/i.test(label);
+
+          if (labelled || (nearTop && nearRight)) {
+            candidates.push({
+              control,
+              score: (nearTop ? 2 : 0) + (nearRight ? 3 : 0) + (labelled ? 4 : 0) +
+                (control.href ? 2 : 0)
+            });
+          }
         }
       }
     }
@@ -216,8 +321,8 @@
           return null;
         };
         control.click();
-      } catch (error) {
-        // Try the next likely viewer control.
+      } catch {
+        // Try the next likely control.
       } finally {
         window.open = originalOpen;
       }
@@ -228,7 +333,7 @@
     return null;
   }
 
-  async function waitForAssignmentDownloadTarget() {
+  async function waitForDownloadTarget() {
     const started = Date.now();
     let triedViewerOpenControl = false;
 
@@ -254,9 +359,12 @@
 
   function makeFilename(label) {
     const week = getWeek(label) ?? "Unknown";
-    let detail = label.replace(/^Week\\s*\\d+\\s*:\\s*/i, "").trim();
-    detail = detail.replace(/[<>:"/\\\\|?*\\x00-\\x1f]/g, "").replace(/\\s+/g, " ").trim();
-    return `${CONFIG.filenamePrefix} - Week ${week} - ${detail}.pdf`;
+    const detail = MODE.filenameDetail(label)
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return CONFIG.filenamePrefix + " - Week " + week + " - " + detail + ".pdf";
   }
 
   function triggerDriveDownload(fileId, filename) {
@@ -274,47 +382,46 @@
 
   async function run() {
     if (!/onlinecourses\.nptel\.ac\.in$/i.test(location.hostname)) {
-      fail("Run this utility from the NPTEL course page, not from a Drive tab.");
+      fail("Run this utility from the NPTEL course page, not from a Google Drive tab.");
       return;
     }
 
-    log("Scanning the course sidebar for Assignment Solution entries only...");
+    log("Selected download type:", MODE.title);
+    log("Scanning the course sidebar for matching entries only...");
 
     const sidebar = findSidebar();
     if (!sidebar) {
-      fail("Could not identify the course sidebar. Wait for the page to load and run again.");
+      fail("Could not identify the course sidebar. Wait for the page to load and try again.");
       return;
     }
 
-    const labels = collectAssignmentSolutionLabels(sidebar);
+    const labels = collectTargetLabels(sidebar);
     if (!labels.length) {
-      fail("No Lecture Assignment Solution rows were found. Scroll the sidebar to load all weeks, then run again.");
+      fail("No " + MODE.title + " entries were found. Scroll the sidebar to load all weeks, then run again.");
       return;
     }
 
     console.table(labels.map((label) => ({ week: getWeek(label), entry: label })));
-    log("Found", labels.length, "Assignment Solution entries. Ordinary lecture/assignment/quiz rows will be ignored.");
+    log("Found", labels.length, MODE.title, "entries. Other lesson types will be ignored.");
 
     const results = [];
 
     for (let index = 0; index < labels.length; index++) {
       const label = labels[index];
-      log(`[${index + 1}/${labels.length}] Opening only: ${label}`);
+      log("[" + (index + 1) + "/" + labels.length + "] Opening only: " + label);
 
       let outcome = { success: false, label };
 
       for (let attempt = 1; attempt <= CONFIG.retries; attempt++) {
         try {
-          // The SPA keeps the sidebar mounted while the content pane changes.
-          const currentSidebar = findSidebar();
-          if (!currentSidebar) throw new Error("Sidebar is no longer available.");
+          await clickTargetRow(label);
 
-          clickExactRow(currentSidebar, label);
-          await sleep(CONFIG.pageWaitMs);
+          log("Current page:", location.href);
+          log("Looking for the download link or an accessible embedded viewer reference...");
 
-          const target = await waitForAssignmentDownloadTarget();
+          const target = await waitForDownloadTarget();
           if (!target) {
-            throw new Error("No visible assignment-solution download link or accessible Drive viewer reference was found on this page.");
+            throw new Error("No download link or accessible Drive viewer reference was found on this page.");
           }
 
           const fileId = extractDriveId(target.url);
@@ -325,32 +432,33 @@
           const filename = makeFilename(label);
           const downloadUrl = triggerDriveDownload(fileId, filename);
 
-          success("Assignment solution download requested:", filename);
+          success("Download requested:", filename);
           outcome = { success: true, label, filename, fileId, downloadUrl };
           break;
         } catch (error) {
-          warn(`Attempt ${attempt}/${CONFIG.retries} failed for "${label}":`, error.message);
-          if (attempt < CONFIG.retries) await sleep(1500);
+          warn("Attempt " + attempt + "/" + CONFIG.retries + " failed for \"" + label + "\":", error.message);
+          if (attempt < CONFIG.retries) await sleep(1600);
         }
       }
 
       results.push(outcome);
-
       if (index < labels.length - 1) await sleep(CONFIG.betweenItemsMs);
     }
 
     const successful = results.filter((item) => item.success);
     const failed = results.filter((item) => !item.success);
 
-    console.log("\nNPTEL Assignment Solutions Downloader — Summary");
+    console.log("\nNPTEL Downloader — " + MODE.title + " summary");
     console.table(results.map((item) => ({
       entry: item.label,
       status: item.success ? "Download requested" : "Failed",
       filename: item.filename || ""
     })));
 
-    success(`${successful.length} download(s) requested; ${failed.length} item(s) failed.`);
-    if (failed.length) warn("Review the failed Assignment Solution pages manually. Embedded cross-origin Drive viewers may not expose their final URL to a script running on NPTEL.");
+    success(successful.length + " download(s) requested; " + failed.length + " item(s) failed.");
+    if (failed.length) {
+      warn("Review failed pages manually. Embedded cross-origin Drive viewers may not expose their final URL to a script running on NPTEL.");
+    }
     log("Check Chrome Downloads (Ctrl+J). Allow multiple downloads if Chrome asks.");
   }
 
