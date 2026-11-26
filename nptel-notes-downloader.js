@@ -1,12 +1,12 @@
 /*
- * NPTEL Notes Downloader
- * Browser-console utility for downloading NPTEL lecture-note PDFs.
+ * NPTEL Assignment Solutions Downloader
+ * Browser-console utility for downloading NPTEL assignment-solution PDFs.
  *
  * Usage: Open the NPTEL course page, open DevTools Console, and paste
  * this complete file. Review detected entries before allowing downloads.
  *
- * This utility only targets sidebar items labelled "Lecture Notes".
- * It does not click ordinary lecture, assignment, quiz, or feedback rows.
+ * This utility only targets sidebar items labelled "Week N: Assignment N Solution".
+ * It ignores ordinary lecture, quiz, feedback, and assignment rows that are not labelled as solutions.
  */
 
 (async () => {
@@ -22,17 +22,17 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  const notePattern = /^Week\s*\d+\s*:\s*Lecture\s*Notes?$/i;
-  const numberedNotePattern = /^Lecture\s*Note[_\s-]*\d+\s+for\s+Week\s*\d+$/i;
+  const assignmentSolutionPattern = /^Week\\s*\\d+\\s*:\\s*Assignment\\s*\\d+\\s*Solution$/i;
+  const alternateAssignmentSolutionPattern = /^Assignment\\s*\\d+\\s*Solution\\s+for\\s+Week\\s*\\d+$/i;
 
-  const log = (...args) => console.log("%c[NPTEL Notes]", "color:#0891b2;font-weight:bold", ...args);
-  const success = (...args) => console.log("%c[NPTEL Notes] ✓", "color:#16a34a;font-weight:bold", ...args);
-  const warn = (...args) => console.warn("%c[NPTEL Notes]", "color:#d97706;font-weight:bold", ...args);
-  const fail = (...args) => console.error("%c[NPTEL Notes]", "color:#dc2626;font-weight:bold", ...args);
+  const log = (...args) => console.log("%c[NPTEL Assignment Solutions]", "color:#0891b2;font-weight:bold", ...args);
+  const success = (...args) => console.log("%c[NPTEL Assignment Solutions] ✓", "color:#16a34a;font-weight:bold", ...args);
+  const warn = (...args) => console.warn("%c[NPTEL Assignment Solutions]", "color:#d97706;font-weight:bold", ...args);
+  const fail = (...args) => console.error("%c[NPTEL Assignment Solutions]", "color:#dc2626;font-weight:bold", ...args);
 
-  function isNoteLabel(text) {
+  function isAssignmentSolutionLabel(text) {
     const value = normalize(text);
-    return notePattern.test(value) || numberedNotePattern.test(value);
+    return assignmentSolutionPattern.test(value) || alternateAssignmentSolutionPattern.test(value);
   }
 
   function getWeek(text) {
@@ -50,11 +50,11 @@
       if (rect.width < 140 || rect.height < 180 || rect.left > window.innerWidth * 0.55) continue;
 
       const text = normalize(element.innerText);
-      if (!text || !/Week\s*\d+/i.test(text) || !/Lecture/i.test(text)) continue;
+      if (!text || !/Week\\s*\\d+/i.test(text) || !/Assignment/i.test(text)) continue;
 
-      const weekCount = (text.match(/Week\s*\d+/gi) || []).length;
-      const noteCount = (text.match(/Lecture\s*Notes?/gi) || []).length;
-      const score = Math.min(weekCount, 30) * 3 + Math.min(noteCount, 20) * 8 +
+      const weekCount = (text.match(/Week\\s*\\d+/gi) || []).length;
+      const solutionCount = (text.match(/Assignment\\s*\\d+\\s*Solution/gi) || []).length;
+      const score = Math.min(weekCount, 30) * 3 + Math.min(solutionCount, 20) * 10 +
         (element.scrollHeight > element.clientHeight + 40 ? 12 : 0) -
         Math.max(0, rect.width - 450) / 20;
 
@@ -67,12 +67,14 @@
     return best;
   }
 
-  function collectNoteLabels(sidebar) {
+  function collectAssignmentSolutionLabels(sidebar) {
     const labels = new Set();
 
     for (const element of sidebar.querySelectorAll("*")) {
       const label = normalize(element.innerText);
-      if (label && label.length <= 90 && isNoteLabel(label)) labels.add(label);
+      if (label && label.length <= 110 && isAssignmentSolutionLabel(label)) {
+        labels.add(label);
+      }
     }
 
     return [...labels].sort((a, b) => {
@@ -111,21 +113,20 @@
   function findDownloadAnchor() {
     const anchors = [...document.querySelectorAll("a[href]")];
 
-    // The visible wording supplied from the course page.
-    const byText = anchors.find((anchor) => {
+    const byClickHere = anchors.find((anchor) => {
       const text = normalize(anchor.innerText || anchor.textContent).toLowerCase();
       return text.includes("click here") && text.includes("download");
     });
-    if (byText) return byText;
+    if (byClickHere) return byClickHere;
 
-    const byDownloadText = anchors.find((anchor) => {
+    const byAssignmentText = anchors.find((anchor) => {
       const text = normalize(anchor.innerText || anchor.textContent).toLowerCase();
-      return text.includes("download lecture notes");
+      return text.includes("download") &&
+        (text.includes("assignment") || text.includes("solution"));
     });
-    if (byDownloadText) return byDownloadText;
+    if (byAssignmentText) return byAssignmentText;
 
-    // Some lesson pages expose a Drive URL directly.
-    return anchors.find((anchor) => /drive\.google\.com|docs\.google\.com/i.test(anchor.href)) || null;
+    return anchors.find((anchor) => /drive\\.google\\.com|docs\\.google\\.com/i.test(anchor.href)) || null;
   }
 
   function extractDriveId(url) {
@@ -227,7 +228,7 @@
     return null;
   }
 
-  async function waitForNoteDownloadTarget() {
+  async function waitForAssignmentDownloadTarget() {
     const started = Date.now();
     let triedViewerOpenControl = false;
 
@@ -253,9 +254,8 @@
 
   function makeFilename(label) {
     const week = getWeek(label) ?? "Unknown";
-    let detail = label.replace(/^Week\s*\d+\s*:\s*/i, "").trim();
-    if (!detail || /^Lecture\s*Notes?$/i.test(detail)) detail = "Lecture Notes";
-    detail = detail.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
+    let detail = label.replace(/^Week\\s*\\d+\\s*:\\s*/i, "").trim();
+    detail = detail.replace(/[<>:"/\\\\|?*\\x00-\\x1f]/g, "").replace(/\\s+/g, " ").trim();
     return `${CONFIG.filenamePrefix} - Week ${week} - ${detail}.pdf`;
   }
 
@@ -278,7 +278,7 @@
       return;
     }
 
-    log("Scanning the course sidebar for Lecture Notes entries only...");
+    log("Scanning the course sidebar for Assignment Solution entries only...");
 
     const sidebar = findSidebar();
     if (!sidebar) {
@@ -286,14 +286,14 @@
       return;
     }
 
-    const labels = collectNoteLabels(sidebar);
+    const labels = collectAssignmentSolutionLabels(sidebar);
     if (!labels.length) {
-      fail("No Lecture Notes rows were found. Scroll the sidebar to load all weeks, then run again.");
+      fail("No Lecture Assignment Solution rows were found. Scroll the sidebar to load all weeks, then run again.");
       return;
     }
 
     console.table(labels.map((label) => ({ week: getWeek(label), entry: label })));
-    log("Found", labels.length, "Notes entries. Ordinary lecture/assignment/quiz rows will be ignored.");
+    log("Found", labels.length, "Assignment Solution entries. Ordinary lecture/assignment/quiz rows will be ignored.");
 
     const results = [];
 
@@ -312,9 +312,9 @@
           clickExactRow(currentSidebar, label);
           await sleep(CONFIG.pageWaitMs);
 
-          const target = await waitForNoteDownloadTarget();
+          const target = await waitForAssignmentDownloadTarget();
           if (!target) {
-            throw new Error("No visible download link or accessible Drive viewer reference was found on this Notes page.");
+            throw new Error("No visible assignment-solution download link or accessible Drive viewer reference was found on this page.");
           }
 
           const fileId = extractDriveId(target.url);
@@ -325,7 +325,7 @@
           const filename = makeFilename(label);
           const downloadUrl = triggerDriveDownload(fileId, filename);
 
-          success("Download requested:", filename);
+          success("Assignment solution download requested:", filename);
           outcome = { success: true, label, filename, fileId, downloadUrl };
           break;
         } catch (error) {
@@ -342,7 +342,7 @@
     const successful = results.filter((item) => item.success);
     const failed = results.filter((item) => !item.success);
 
-    console.log("\nNPTEL Notes Downloader — Summary");
+    console.log("\nNPTEL Assignment Solutions Downloader — Summary");
     console.table(results.map((item) => ({
       entry: item.label,
       status: item.success ? "Download requested" : "Failed",
@@ -350,7 +350,7 @@
     })));
 
     success(`${successful.length} download(s) requested; ${failed.length} item(s) failed.`);
-    if (failed.length) warn("Review the failed Notes pages manually. Embedded cross-origin Drive viewers may not expose their final URL to a script running on NPTEL.");
+    if (failed.length) warn("Review the failed Assignment Solution pages manually. Embedded cross-origin Drive viewers may not expose their final URL to a script running on NPTEL.");
     log("Check Chrome Downloads (Ctrl+J). Allow multiple downloads if Chrome asks.");
   }
 
